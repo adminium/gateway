@@ -7,6 +7,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/encoding/protojson"
 	"log"
 	"math"
 	"net"
@@ -95,7 +96,17 @@ func (g *GrpcGatewayStarter) Start() (err error) {
 		})),
 		runtime.WithOutgoingHeaderMatcher(BlacklistHeaderMatcher(map[string]struct{}{})),
 		runtime.WithErrorHandler(ErrorHandler),
-		//runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONBuiltin{}),
+		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.HTTPBodyMarshaler{
+			Marshaler: &runtime.JSONPb{
+				MarshalOptions: protojson.MarshalOptions{
+					EmitUnpopulated: true,
+					UseProtoNames:   true,
+				},
+				UnmarshalOptions: protojson.UnmarshalOptions{
+					DiscardUnknown: true,
+				},
+			},
+		}),
 	)
 
 	conn, err := grpc.NewClient(
