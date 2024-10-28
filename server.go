@@ -95,6 +95,7 @@ func (g *GrpcGatewayStarter) Start() (err error) {
 		})),
 		runtime.WithOutgoingHeaderMatcher(BlacklistHeaderMatcher(map[string]struct{}{})),
 		runtime.WithErrorHandler(ErrorHandler),
+		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONBuiltin{}),
 	)
 
 	conn, err := grpc.NewClient(
