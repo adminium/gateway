@@ -7,12 +7,25 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"log"
 	"math"
 	"net"
 	"net/http"
 )
+
+const metaContextKey = "x-gateway-meta-context"
+
+func AddMetaValue(ctx context.Context, key, value string) context.Context {
+	if ctx.Value(metaContextKey) == nil {
+		ctx = context.WithValue(ctx, metaContextKey, map[string]string{})
+	}
+	r := ctx.Value(metaContextKey).(map[string]string)
+	r[key] = value
+	ctx = context.WithValue(ctx, metaContextKey, r)
+	return ctx
+}
 
 type GrpcGatewayService interface {
 	RegisterGrpcService(server *grpc.Server)
@@ -21,7 +34,7 @@ type GrpcGatewayService interface {
 
 func NewGrpcGatewayStarter() *GrpcGatewayStarter {
 	return &GrpcGatewayStarter{
-		middlewares: []grpc.UnaryServerInterceptor{
+		grpcMiddlewares: []grpc.UnaryServerInterceptor{
 			middlewares.PanicRecoveryInspector(),
 			middlewares.GrpcErrorInterceptor(),
 			middlewares.APIInspector(),
@@ -33,7 +46,8 @@ type GrpcGatewayStarter struct {
 	httpServerAddr      string
 	grpcServerAddr      string
 	grpcGatewayServices []GrpcGatewayService
-	middlewares         []grpc.UnaryServerInterceptor
+	grpcMiddlewares     []grpc.UnaryServerInterceptor
+	middlewares         []func(handler http.Handler) http.Handler
 }
 
 func (g *GrpcGatewayStarter) WithHttpServerAddr(addr string) *GrpcGatewayStarter {
@@ -51,7 +65,12 @@ func (g *GrpcGatewayStarter) WithGrpcGatewayService(service GrpcGatewayService) 
 	return g
 }
 
-func (g *GrpcGatewayStarter) WithMiddleware(middleware ...grpc.UnaryServerInterceptor) *GrpcGatewayStarter {
+func (g *GrpcGatewayStarter) WithGrpcMiddleware(middleware ...grpc.UnaryServerInterceptor) *GrpcGatewayStarter {
+	g.grpcMiddlewares = append(g.grpcMiddlewares, middleware...)
+	return g
+}
+
+func (g *GrpcGatewayStarter) WithMiddleware(middleware ...func(handler http.Handler) http.Handler) *GrpcGatewayStarter {
 	g.middlewares = append(g.middlewares, middleware...)
 	return g
 }
@@ -74,7 +93,7 @@ func (g *GrpcGatewayStarter) Start() (err error) {
 		return
 	}
 
-	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(g.middlewares...))
+	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(g.grpcMiddlewares...))
 	for _, grpcService := range g.grpcGatewayServices {
 		grpcService.RegisterGrpcService(grpcServer)
 	}
@@ -107,6 +126,16 @@ func (g *GrpcGatewayStarter) Start() (err error) {
 				},
 			},
 		}),
+		runtime.WithMetadata(func(ctx context.Context, r *http.Request) metadata.MD {
+			md := make(map[string]string)
+			if mv := ctx.Value(metaContextKey); mv != nil {
+				mm := mv.(map[string]string)
+				for k, v := range mm {
+					md[k] = v
+				}
+			}
+			return metadata.New(md)
+		}),
 	)
 
 	conn, err := grpc.NewClient(
@@ -124,7 +153,11 @@ func (g *GrpcGatewayStarter) Start() (err error) {
 		}
 	}
 
-	h := middlewares.HttpAllowCorsHandler(mux)
+	//h := middlewares.HttpAllowCorsHandler(mux)
+	var h http.Handler = mux
+	for _, m := range g.middlewares {
+		h = m(h)
+	}
 
 	log.Println("Starting Http server on:", g.httpServerAddr)
 
