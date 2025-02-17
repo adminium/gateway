@@ -48,6 +48,12 @@ type GrpcGatewayStarter struct {
 	grpcGatewayServices []GrpcGatewayService
 	grpcMiddlewares     []grpc.UnaryServerInterceptor
 	middlewares         []func(handler http.Handler) http.Handler
+	cors                bool
+}
+
+func (g *GrpcGatewayStarter) WithCors() *GrpcGatewayStarter {
+	g.cors = true
+	return g
 }
 
 func (g *GrpcGatewayStarter) WithHttpServerAddr(addr string) *GrpcGatewayStarter {
@@ -153,10 +159,13 @@ func (g *GrpcGatewayStarter) Start() (err error) {
 		}
 	}
 
-	//h := middlewares.HttpAllowCorsHandler(mux)
 	var h http.Handler = mux
 	for _, m := range g.middlewares {
 		h = m(h)
+	}
+
+	if g.cors {
+		h = httpAllowCorsHandler(h)
 	}
 
 	log.Println("Starting Http server on:", g.httpServerAddr)
