@@ -45,7 +45,9 @@ func httpAllowCorsHandler(h http.Handler) http.Handler {
 		method := r.Method
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			ResponseHeaders["Access-Control-Allow-Origin"] = origin
+			if ResponseHeaders["Access-Control-Allow-Origin"] != "*" {
+				ResponseHeaders["Access-Control-Allow-Origin"] = origin
+			}
 			for k, v := range ResponseHeaders {
 				w.Header().Set(k, v)
 			}
