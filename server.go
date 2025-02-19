@@ -17,6 +17,12 @@ import (
 
 const metaContextKey = "x-gateway-meta-context"
 
+type Route struct {
+	Method  string
+	Path    string
+	Handler runtime.HandlerFunc
+}
+
 func AddMetaValue(ctx context.Context, key, value string) context.Context {
 	if ctx.Value(metaContextKey) == nil {
 		ctx = context.WithValue(ctx, metaContextKey, map[string]string{})
@@ -49,10 +55,16 @@ type GrpcGatewayStarter struct {
 	grpcMiddlewares     []grpc.UnaryServerInterceptor
 	middlewares         []func(handler http.Handler) http.Handler
 	cors                bool
+	routes              []Route
 }
 
 func (g *GrpcGatewayStarter) WithCors() *GrpcGatewayStarter {
 	g.cors = true
+	return g
+}
+
+func (g *GrpcGatewayStarter) WithRoute(method, path string, handler runtime.HandlerFunc) *GrpcGatewayStarter {
+	g.routes = append(g.routes, Route{method, path, handler})
 	return g
 }
 
@@ -143,6 +155,14 @@ func (g *GrpcGatewayStarter) Start() (err error) {
 			return metadata.New(md)
 		}),
 	)
+
+	for _, route := range g.routes {
+		err = mux.HandlePath(route.Method, route.Path, route.Handler)
+		if err != nil {
+			err = fmt.Errorf("handle path error: %s", err)
+			return
+		}
+	}
 
 	conn, err := grpc.NewClient(
 		g.grpcServerAddr,
